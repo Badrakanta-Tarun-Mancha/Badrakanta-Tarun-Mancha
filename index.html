@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="bn" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>বদরকণ্ঠ তারুণ্য মঞ্চ — রক্তদাতা তালিকা</title>
+  <meta name="description" content="বদরকণ্ঠ তারুণ্য মঞ্চের রক্তদাতা তালিকা। ব্লাড গ্রুপ ও এলাকা অনুযায়ী রক্তদাতা খুঁজুন, বিনা খরচে।">
+  <meta name="theme-color" content="#f3efee">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="রক্তদাতা তালিকা">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    /* পেজ আঁকার আগেই থিম বসানো, যাতে ঝলক না লাগে */
+    try {
+      var t = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="bg" aria-hidden="true">
+    <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
+    <div class="grid-bg"></div>
+  </div>
+
+  <div id="demoBar" class="demo-bar" hidden></div>
+
+  <header class="topbar">
+    <a class="brand" href="#/" aria-label="হোম">
+      <img class="logo-light" src="assets/logo-mark.png" alt="" width="44" height="38">
+      <img class="logo-dark" src="assets/logo-mark-dark.png" alt="" width="44" height="38">
+      <span class="brand-text"><b data-org-name>বদরকণ্ঠ তারুণ্য মঞ্চ</b><small>রক্তদাতা তালিকা</small></span>
+    </a>
+    <div class="top-actions">
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="ডার্ক / লাইট মোড"></button>
+      <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="মেনু" aria-expanded="false" aria-controls="drawer">
+        <span class="burger"><i></i><i></i><i></i></span>
+      </button>
+    </div>
+  </header>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-label="মেনু">
+    <div class="drawer-head">
+      <img class="logo-light" src="assets/logo-mark.png" alt="" width="52" height="45">
+      <img class="logo-dark" src="assets/logo-mark-dark.png" alt="" width="52" height="45">
+      <b data-org-name>বদরকণ্ঠ তারুণ্য মঞ্চ</b>
+    </div>
+    <nav id="drawerLinks" class="drawer-links"></nav>
+    <div class="drawer-foot">
+      <button class="btn btn-ghost js-install" type="button" hidden></button>
+    </div>
+  </aside>
+
+  <main id="app" tabindex="-1"></main>
+
+  <footer class="footer">
+    <div class="container foot-inner">
+      <div><b data-org-name>বদরকণ্ঠ তারুণ্য মঞ্চ</b><p class="muted">অরাজনৈতিক শিক্ষার্থী সংগঠন · স্বেচ্ছায় রক্তদান</p></div>
+      <div class="foot-links"><a href="#/search">রক্তদাতা খুঁজুন</a><a href="#/register">রক্তদাতা হোন</a><a href="#/donate">ডোনেশন</a><a href="#/about">আমাদের সম্পর্কে</a><a href="#/developer">ডেভেলপার</a></div>
+    </div>
+    <p class="copy">© <span id="year"></span> <span data-org-name>বদরকণ্ঠ তারুণ্য মঞ্চ</span></p>
+  </footer>
+
+  <nav class="bottom-nav" id="bottomNav" aria-label="দ্রুত নেভিগেশন"></nav>
+
+  <div id="toasts" aria-live="polite"></div>
+  <div id="modal" class="modal"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/districts.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
