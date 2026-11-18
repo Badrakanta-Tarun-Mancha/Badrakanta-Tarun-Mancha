@@ -5,11 +5,29 @@
 (() => {
 'use strict';
 
+/* কোনো ত্রুটি হলে পেজ খালি না রেখে স্ক্রিনে কারণ দেখানো */
+function showFatal(msg) {
+  const app = document.getElementById('app');
+  if (!app || app.dataset.fatal) return;
+  app.dataset.fatal = '1';
+  const box = document.createElement('div');
+  box.style.cssText = 'margin:24px 16px;padding:18px;border:2px solid #c2455a;border-radius:16px;background:rgba(194,69,90,.12);font:15px/1.6 system-ui,sans-serif;word-break:break-word';
+  box.innerHTML = '<b>সাইট চালু হতে সমস্যা হয়েছে।</b><br>এই লেখাটির ছবি তুলে Claude-কে পাঠান:<br><code></code>';
+  box.querySelector('code').textContent = String(msg);
+  app.appendChild(box);
+}
+window.addEventListener('error', (e) => showFatal((e.message || 'error') + (e.filename ? ' @ ' + e.filename.split('/').pop() + ':' + e.lineno : '')));
+window.addEventListener('unhandledrejection', (e) => showFatal('promise: ' + ((e.reason && e.reason.message) || e.reason)));
+
 /* ---------------------------------------------------------------- কনফিগ */
 const CFG = window.APP_CONFIG || {};
 const GAP_DAYS = Number(CFG.DONATION_GAP_DAYS) || 120;
 const CONFIGURED = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && !/YOUR_/i.test(CFG.SUPABASE_URL + CFG.SUPABASE_ANON_KEY));
-const sb = (CONFIGURED && window.supabase) ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY) : null;
+let sb = null;
+if (CONFIGURED && window.supabase) {
+  try { sb = window.supabase.createClient(String(CFG.SUPABASE_URL).trim(), String(CFG.SUPABASE_ANON_KEY).trim()); }
+  catch (e) { console.error(e); setTimeout(() => showFatal('Supabase কনফিগ ভুল: ' + e.message + ' — js/config.js-এর লাইন ৯ ও ১০ দেখুন'), 0); }
+}
 const DEMO = !sb;
 const DEMO_MSG = 'এটি ডেমো মোড। js/config.js-এ Supabase-এর তথ্য বসালে এই কাজ চালু হবে।';
 
