@@ -1,6 +1,6 @@
 /* সার্ভিস ওয়ার্কার: সাইটকে অ্যাপের মতো ইনস্টলযোগ্য করে এবং অফলাইনে মূল পেজ খোলার সুবিধা দেয়।
    সাইটে বড় পরিবর্তন করলে নিচের VERSION সংখ্যাটা বাড়িয়ে দিন। */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = 'btm-blood-' + VERSION;
 const CORE = [
   './', 'index.html', 'css/style.css', 'js/config.js', 'js/districts.js', 'js/app.js',
