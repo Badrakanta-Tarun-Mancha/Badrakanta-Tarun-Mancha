@@ -1,9 +1,9 @@
 /* সার্ভিস ওয়ার্কার: সাইটকে অ্যাপের মতো ইনস্টলযোগ্য করে এবং অফলাইনে মূল পেজ খোলার সুবিধা দেয়।
    সাইটে বড় পরিবর্তন করলে নিচের VERSION সংখ্যাটা বাড়িয়ে দিন। */
-const VERSION = 'v3';
+const VERSION = 'v5';
 const CACHE = 'btm-blood-' + VERSION;
 const CORE = [
-  './', 'index.html', 'css/style.css', 'js/config.js', 'js/districts.js', 'js/app.js',
+  './', 'index.html', 'css/style.css', 'css/theme.css', 'js/config.js', 'js/districts.js', 'js/app.js',
   'manifest.webmanifest', 'assets/logo-mark.png', 'assets/logo-mark-dark.png',
   'assets/icon-192.png', 'assets/favicon-32.png'
 ];
