@@ -82,7 +82,11 @@ const SETTING_FIELDS = [
 ];
 
 const PAY_KINDS = [['bkash', 'বিকাশ'], ['nagad', 'নগদ'], ['rocket', 'রকেট'], ['bank', 'ব্যাংক'], ['other', 'অন্যান্য']];
-const ROLE_BN = { donor: 'রক্তদাতা', moderator: 'মডারেটর', developer: 'ডেভেলপার' };
+const ROLE_BN = { donor: 'রক্তদাতা', moderator: 'মডারেটর', admin: 'অ্যাডমিন', developer: 'ডেভেলপার' };
+const PANEL_BN = { donor: 'আমার প্রোফাইল', moderator: 'মডারেটর প্যানেল', admin: 'অ্যাডমিন প্যানেল', developer: 'ডেভেলপার প্যানেল' };
+const NOTICE_DURATIONS = [[24, '২৪ ঘণ্টা'], [48, '২ দিন'], [72, '৩ দিন'], [168, '১ সপ্তাহ']];
+const isModRole = (r) => r === 'moderator' || r === 'admin' || r === 'developer';
+const isAdminRole = (r) => r === 'admin' || r === 'developer';
 const STATUS_BN = { pending: 'অপেক্ষমাণ', approved: 'অনুমোদিত', rejected: 'বাতিল' };
 
 /* ---------------------------------------------------------------- আইকন */
@@ -119,9 +123,15 @@ const ICONS = {
   clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   phone2: '<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
   arrow: '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>',
+  bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
   alert: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
 };
 const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ''}</svg>`;
+
+/* ভেরিফিকেশন ব্যাজ: ডেভেলপার = সবুজ, অ্যাডমিন = নীল, মডারেটর = লাল */
+const BADGE_TITLE = { developer: 'যাচাইকৃত ডেভেলপার', admin: 'যাচাইকৃত অ্যাডমিন', moderator: 'যাচাইকৃত মডারেটর' };
+const badge = (role) => !BADGE_TITLE[role] ? '' :
+  `<span class="vb vb-${role}" title="${BADGE_TITLE[role]}" aria-label="${BADGE_TITLE[role]}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.5l2.4 1.7 2.9-.2 1.2 2.7 2.6 1.4-.4 2.9L22 12l-1.3 2 .4 2.9-2.6 1.4-1.2 2.7-2.9-.2L12 22.5l-2.4-1.7-2.9.2-1.2-2.7-2.6-1.4.4-2.9L2 12l1.3-2-.4-2.9 2.6-1.4 1.2-2.7 2.9.2z" fill="currentColor"/><path d="M8 12.2l2.7 2.7L16.2 9.4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
 
 /* ---------------------------------------------------------------- হেল্পার */
 const $ = (s, r = document) => r.querySelector(s);
@@ -145,6 +155,20 @@ const fmtDate = (s) => fmtD(parseDate(s));
 const daysSince = (s) => Math.floor((new Date().setHours(0, 0, 0, 0) - parseDate(s)) / 86400000);
 const addDays = (s, n) => { const d = parseDate(s); d.setDate(d.getDate() + n); return d; };
 const isReady = (s) => !s || daysSince(s) >= GAP_DAYS;
+const relPast = (iso) => {
+  const m = Math.max(0, Math.floor((Date.now() - new Date(iso)) / 60000));
+  if (m < 1) return 'এইমাত্র';
+  if (m < 60) return bn(m) + ' মিনিট আগে';
+  if (m < 1440) return bn(Math.floor(m / 60)) + ' ঘণ্টা আগে';
+  return bn(Math.floor(m / 1440)) + ' দিন আগে';
+};
+const relLeft = (iso) => {
+  const m = Math.floor((new Date(iso) - Date.now()) / 60000);
+  if (m <= 0) return 'মেয়াদ শেষ';
+  if (m < 60) return 'আরও ' + bn(m) + ' মিনিট';
+  if (m < 1440) return 'আরও ' + bn(Math.floor(m / 60)) + ' ঘণ্টা';
+  return 'আরও ' + bn(Math.floor(m / 1440)) + ' দিন';
+};
 const debounce = (fn, ms = 350) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 const paragraphs = (t) => String(t || '').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
 
@@ -219,6 +243,10 @@ const DEMO_DONORS = [
   ['ইমরান হোসেন', 'AB-', 'বরিশাল', 'কাউনিয়া', null], ['তাসনিম রহমান', 'A+', 'ঢাকা', 'ধানমন্ডি', 130],
   ['মাহিন চৌধুরী', 'O+', 'গাজীপুর', 'টঙ্গী', 90], ['জান্নাতুল ফেরদৌস', 'B+', 'রংপুর', 'কাউনিয়া', 260]
 ].map((r, i) => ({ id: 'demo' + i, name: r[0], blood_group: r[1], phone: '017000000' + String(i + 10), district: r[2], area: r[3], last_donation: r[4] == null ? null : ago(r[4]), status: 'approved' }));
+const DEMO_NOTICES = [
+  { id: 'n1', title: 'রক্তদান কর্মসূচি', body: 'এই শুক্রবার সকাল ১০টা থেকে বিকাল ৪টা পর্যন্ত স্কুল মাঠে রক্তদান কর্মসূচি। সবাইকে আন্তরিক আমন্ত্রণ।', author_name: 'অ্যাডমিন', author_role: 'admin', created_at: new Date(Date.now() - 3600e3).toISOString(), expires_at: new Date(Date.now() + 2 * 86400e3).toISOString() },
+  { id: 'n2', title: 'জরুরি: ও নেগেটিভ রক্ত দরকার', body: 'সদর হাসপাতালে একজন রোগীর জন্য জরুরি ভিত্তিতে ও নেগেটিভ রক্ত প্রয়োজন।', author_name: 'ডেভেলপার', author_role: 'developer', created_at: new Date(Date.now() - 7200e3).toISOString(), expires_at: new Date(Date.now() + 20 * 3600e3).toISOString() }
+];
 const DEMO_PAYMENTS = [
   { id: 'p1', name: 'বিকাশ', kind: 'bkash', number: '01XXXXXXXXX', account_type: 'পার্সোনাল' },
   { id: 'p2', name: 'নগদ', kind: 'nagad', number: '01XXXXXXXXX', account_type: 'পার্সোনাল' },
@@ -261,6 +289,30 @@ const API = {
   async deletePayment(id) {
     if (DEMO) demoOnly();
     const { error } = await sb.from('payment_methods').delete().eq('id', id);
+    if (error) throw error;
+  },
+  async notices(all = false) {
+    if (DEMO) return DEMO_NOTICES;
+    let q = sb.from('notices').select('*').order('created_at', { ascending: false }).limit(all ? 100 : 50);
+    if (!all) q = q.gt('expires_at', new Date().toISOString());
+    const { data, error } = await q;
+    if (error) throw error;
+    return data || [];
+  },
+  async createNotice(n) {
+    if (DEMO) demoOnly();
+    const { data, error } = await sb.from('notices').insert(n).select().single();
+    if (error) throw error;
+    return data;
+  },
+  async deleteNotice(id) {
+    if (DEMO) demoOnly();
+    const { error } = await sb.from('notices').delete().eq('id', id);
+    if (error) throw error;
+  },
+  async deleteUser(id) {
+    if (DEMO) demoOnly();
+    const { error } = await sb.rpc('delete_user_account', { target: id });
     if (error) throw error;
   },
   async stats() {
@@ -356,19 +408,18 @@ const toggleTheme = () => applyTheme(document.documentElement.dataset.theme === 
 function navItems() {
   const items = [
     ['', 'হোম', 'home'], ['search', 'রক্তদাতা খুঁজুন', 'search'], ['register', 'রক্তদাতা হোন', 'user-plus'],
-    ['donate', 'ডোনেশন', 'heart'], ['about', 'আমাদের সম্পর্কে', 'info'], ['developer', 'ডেভেলপার পরিচিতি', 'code']
+    ['notices', 'নোটিশ বোর্ড', 'bell'], ['donate', 'ডোনেশন', 'heart'], ['about', 'আমাদের সম্পর্কে', 'info'], ['developer', 'ডেভেলপার পরিচিতি', 'code']
   ];
   if (S.user) {
-    const label = S.role === 'developer' ? 'ডেভেলপার প্যানেল' : S.role === 'moderator' ? 'মডারেটর প্যানেল' : 'আমার প্রোফাইল';
-    items.push(['dashboard', label, 'user']);
+    items.push(['dashboard', PANEL_BN[S.role] || PANEL_BN.donor, 'user']);
   } else items.push(['login', 'লগইন', 'log-in']);
   return items;
 }
 function renderNav(active = currentPath()) {
   $('#drawerLinks').innerHTML = navItems().map(([p, l, ic], i) =>
     `<a href="#/${p}" style="--i:${i}" class="${p === active ? 'on' : ''}">${icon(ic)}<span>${l}</span></a>`).join('') +
-    (S.user ? `<a href="#/" data-logout style="--i:8">${icon('log-out')}<span>লগআউট</span></a>` : '');
-  const bottom = [['', 'হোম', 'home'], ['search', 'খুঁজুন', 'search'], ['register', 'রক্তদাতা হোন', 'user-plus'], ['donate', 'ডোনেশন', 'heart']];
+    (S.user ? `<a href="#/" data-logout style="--i:9">${icon('log-out')}<span>লগআউট</span></a>` : '');
+  const bottom = [['', 'হোম', 'home'], ['search', 'খুঁজুন', 'search'], ['register', 'রক্তদাতা হোন', 'user-plus'], ['notices', 'নোটিশ', 'bell'], ['donate', 'ডোনেশন', 'heart']];
   $('#bottomNav').innerHTML = bottom.map(([p, l, ic]) => `<a href="#/${p}" class="${p === active ? 'on' : ''}">${icon(ic)}<span>${l}</span></a>`).join('');
 }
 const setDrawer = (open) => {
@@ -496,7 +547,7 @@ async function route() {
   app.classList.remove('page-in'); void app.offsetWidth; app.classList.add('page-in');
   window.scrollTo(0, 0);
   updateInstallUI();
-  const titles = { search: 'রক্তদাতা খুঁজুন', register: 'রক্তদাতা হোন', donate: 'ডোনেশন', about: 'আমাদের সম্পর্কে', developer: 'ডেভেলপার পরিচিতি', login: 'লগইন', dashboard: 'ড্যাশবোর্ড' };
+  const titles = { notices: 'নোটিশ বোর্ড', search: 'রক্তদাতা খুঁজুন', register: 'রক্তদাতা হোন', donate: 'ডোনেশন', about: 'আমাদের সম্পর্কে', developer: 'ডেভেলপার পরিচিতি', login: 'লগইন', dashboard: 'ড্যাশবোর্ড' };
   document.title = (titles[path] ? titles[path] + ' · ' : '') + S.settings.org_name;
 }
 
@@ -520,9 +571,11 @@ routes[''] = async (app, p, alive) => {
     <div class="cta">
       <a class="btn btn-primary" href="#/search">${icon('search')} রক্তদাতা খুঁজুন</a>
       <a class="btn btn-ghost" href="#/register">${icon('user-plus')} রক্তদাতা হোন</a>
-      <button class="btn btn-ghost js-install" type="button" hidden></button>
     </div>
   </div></section>
+
+  <section class="container" id="homeNotices" hidden><div class="between"><h2 class="sec-title" style="margin-bottom:0">${icon('bell')} নোটিশ বোর্ড</h2><a href="#/notices" class="btn btn-ghost btn-sm">সব দেখুন ${icon('arrow')}</a></div>
+    <div class="cards cards-notice" id="hnList" style="margin-top:14px"></div></section>
 
   <section class="container"><h2 class="sec-title">কোন গ্রুপের রক্ত প্রয়োজন?</h2>
     <div class="group-grid">${BLOOD.map((g) => `<a class="group-tile" href="#/search?group=${encodeURIComponent(g)}"><span class="drop"><span>${g}</span></span><small data-count="${esc(g)}">${BLOOD_BN[g]}</small></a>`).join('')}</div>
@@ -548,6 +601,12 @@ routes[''] = async (app, p, alive) => {
     </div>
   </section>`;
   updateInstallUI();
+  API.notices(false).then((list) => {
+    if (!alive() || !list.length) return;
+    const box = $('#homeNotices', app); if (!box) return;
+    $('#hnList', box).innerHTML = list.slice(0, 3).map((n) => noticeCard(n)).join('');
+    box.hidden = false;
+  }).catch(() => {});
   try {
     const st = await API.stats();
     if (!alive()) return;
@@ -578,6 +637,29 @@ function donorCard(d, i) {
     </div>
   </article>`;
 }
+
+function noticeCard(n, o = {}) {
+  const expired = new Date(n.expires_at) <= Date.now();
+  return `<article class="notice glass ${expired ? 'expired' : ''}">
+    <div class="n-head"><span class="n-ico">${icon('bell')}</span>
+      <div class="n-meta"><h3>${esc(n.title)}</h3>
+        <p><b>${esc(n.author_name || ROLE_BN[n.author_role] || '')}</b>${badge(n.author_role)} <span class="muted">· ${relPast(n.created_at)}</span></p></div></div>
+    <div class="n-body">${paragraphs(n.body)}</div>
+    <div class="n-foot"><span class="tag ${expired ? 'rest' : 'ready'}">${expired ? 'মেয়াদ শেষ' : relLeft(n.expires_at)}</span>
+      ${o.del ? `<button class="btn btn-danger btn-sm" data-del="${esc(n.id)}" type="button">${icon('trash')} মুছুন</button>` : ''}</div>
+  </article>`;
+}
+
+routes.notices = async (app, p, alive) => {
+  app.innerHTML = `<section class="container"><h1 class="page-title">নোটিশ বোর্ড</h1>
+    <p class="muted" style="max-width:640px">সংগঠনের গুরুত্বপূর্ণ ঘোষণা ও জরুরি বার্তা এখানে প্রকাশিত হয়। প্রতিটি নোটিশ নির্দিষ্ট সময় পর নিজে থেকে সরে যায়।</p>
+    <div class="cards cards-notice" id="nBoard" style="margin-top:18px"><div class="skel"></div><div class="skel"></div></div></section>`;
+  let list = [];
+  try { list = await API.notices(false); } catch (e) { if (alive()) $('#nBoard', app).innerHTML = `<div class="empty glass">${icon('alert')}<b>${esc(errMsg(e))}</b></div>`; return; }
+  if (!alive()) return;
+  $('#nBoard', app).innerHTML = list.length ? list.map((n) => noticeCard(n)).join('')
+    : `<div class="empty glass">${icon('bell')}<b>এখন কোনো নোটিশ নেই</b><p class="muted">নতুন নোটিশ এলে এখানে দেখা যাবে।</p></div>`;
+};
 
 routes.search = async (app, params) => {
   const st = { group: BLOOD.includes(params.get('group')) ? params.get('group') : '', district: params.get('district') || '', q: params.get('q') || '', page: 0 };
@@ -787,16 +869,17 @@ routes.dashboard = async (app, params, alive) => {
   try { await fetchRole(); } catch (e) { S.roleError = String(e && e.message || e); }
   await loadMine(); if (!alive()) return;
   renderNav('dashboard');
-  const isMod = S.role === 'moderator' || S.role === 'developer', isDev = S.role === 'developer';
+  const isMod = isModRole(S.role), isAdm = isAdminRole(S.role), isDev = S.role === 'developer';
   const pending = isMod ? await API.pendingCount() : 0; if (!alive()) return;
   const tabs = [['mine', 'আমার তথ্য', 'user']];
-  if (isMod) tabs.push(['donors', 'রক্তদাতা তালিকা', 'droplet']);
-  if (isDev) tabs.push(['users', 'ব্যবহারকারী', 'users'], ['settings', 'সেটিংস', 'settings']);
+  if (isMod) tabs.push(['donors', 'রক্তদাতা তালিকা', 'droplet'], ['payments', 'ডোনেশন নম্বর', 'heart']);
+  if (isAdm) tabs.push(['notices', 'নোটিশ', 'bell'], ['settings', 'সাইটের লেখা', 'settings']);
+  if (isDev) tabs.push(['users', 'ব্যবহারকারী', 'users']);
   const want = params.get('tab');
   const tab = tabs.some((t) => t[0] === want) ? want : (isMod ? 'donors' : 'mine');
   app.innerHTML = `<section class="container">
-    <div class="dash-head"><div><h1>${S.role === 'developer' ? 'ডেভেলপার প্যানেল' : S.role === 'moderator' ? 'মডারেটর প্যানেল' : 'আমার প্রোফাইল'}</h1>
-      <p>${esc(S.user.email || '')} · <span class="tag role">${ROLE_BN[S.role] || ''}</span></p></div>
+    <div class="dash-head"><div><h1>${PANEL_BN[S.role] || PANEL_BN.donor}</h1>
+      <p>${esc(S.user.email || '')} · ${badge(S.role)} <span class="tag role">${ROLE_BN[S.role] || ''}</span></p></div>
       <button class="btn btn-ghost btn-sm" type="button" id="logoutBtn">${icon('log-out')} লগআউট</button></div>
     ${S.roleError ? `<div class="note bad">${icon('alert')}<span>ভূমিকা পড়া যায়নি: ${esc(S.roleError)}</span></div>` : ''}
     <nav class="tabs">${tabs.map(([k, l, ic]) => `<a class="${k === tab ? 'on' : ''}" href="#/dashboard?tab=${k}">${icon(ic)} ${l}${k === 'donors' && pending ? `<span class="count-dot">${bn(pending)}</span>` : ''}</a>`).join('')}</nav>
@@ -805,6 +888,8 @@ routes.dashboard = async (app, params, alive) => {
   const body = $('#tabBody', app);
   if (tab === 'mine') tabMine(body);
   else if (tab === 'donors') tabDonors(body);
+  else if (tab === 'payments') await tabPayments(body);
+  else if (tab === 'notices') await tabNotices(body);
   else if (tab === 'users') await tabUsers(body);
   else if (tab === 'settings') await tabSettings(body);
 };
@@ -914,42 +999,88 @@ async function tabUsers(el) {
   el.innerHTML = '<div class="skel" style="height:90px"></div>';
   let users;
   try { users = await API.users(); } catch (e) { el.innerHTML = `<div class="note bad">${icon('alert')}<span>${esc(errMsg(e))}</span></div>`; return; }
-  el.innerHTML = `<div class="note">${icon('info')}<span>এখানে যে কাউকে <b>মডারেটর</b> বানাতে পারবেন। মডারেটর রক্তদাতা অনুমোদন, যোগ, সম্পাদনা ও মোছার কাজ করতে পারে; সাইটের সেটিংস বা ডোনেশন নম্বর বদলাতে পারে না।</span></div>
+  el.innerHTML = `<div class="note">${icon('info')}<span><b>ভূমিকা:</b> <b>মডারেটর</b> রক্তদাতা তালিকা ও ডোনেশন নম্বর সামলায়। <b>অ্যাডমিন</b> তার ওপর নোটিশ প্রকাশ ও সাইটের লেখা বদলাতে পারে। <b>ডেভেলপারের</b> কোনো সীমা নেই: সবকিছু দেখা, বদলানো ও মোছা, এমনকি অন্যকে ডেভেলপার বানানোও। নিজের ভূমিকা এখান থেকে বদলানো যায় না, যাতে ভুল করে নিজের ক্ষমতা না হারান।</span></div>
     <div class="input-wrap" style="margin:14px 0">${icon('search')}<input id="uQ" type="search" placeholder="ইমেইল দিয়ে খুঁজুন"></div>
     <div class="row-list" id="uList"></div>`;
   const list = $('#uList', el);
   const draw = (q = '') => {
     const f = users.filter((u) => (u.email || '').toLowerCase().includes(q.toLowerCase()));
-    list.innerHTML = f.map((u) => `<div class="row-card glass" data-id="${esc(u.id)}">
-      <div class="rc-main"><b>${esc(u.email || '—')}</b><span>যোগ দিয়েছেন: ${esc(fmtD(new Date(u.created_at)))}</span></div>
-      ${u.role === 'developer' || u.id === S.user.id ? `<span class="tag role">${ROLE_BN[u.role]}</span>`
-        : `<select data-role aria-label="ভূমিকা" style="width:auto"><option value="donor" ${u.role === 'donor' ? 'selected' : ''}>রক্তদাতা / সাধারণ</option><option value="moderator" ${u.role === 'moderator' ? 'selected' : ''}>মডারেটর</option></select>`}</div>`).join('') || '<div class="empty glass"><b>কেউ নেই</b></div>';
+    list.innerHTML = f.map((u) => {
+      const fixed = u.id === S.user.id;
+      return `<div class="row-card glass" data-id="${esc(u.id)}">
+      <div class="rc-main"><b>${esc(u.email || '—')} ${badge(u.role)}</b><span>যোগ দিয়েছেন: ${esc(fmtD(new Date(u.created_at)))}</span></div>
+      ${fixed ? `<span class="tag role">${ROLE_BN[u.role]}</span>`
+        : `<select data-role aria-label="ভূমিকা" style="width:auto">${['donor', 'moderator', 'admin', 'developer'].map((r) => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r === 'donor' ? 'রক্তদাতা / সাধারণ' : ROLE_BN[r]}</option>`).join('')}</select>
+           <button class="btn btn-danger btn-sm btn-icon" data-rm type="button" aria-label="অ্যাকাউন্ট মুছুন">${icon('trash')}</button>`}</div>`;
+    }).join('') || '<div class="empty glass"><b>কেউ নেই</b></div>';
   };
   draw();
   $('#uQ', el).addEventListener('input', (e) => draw(e.target.value.trim()));
   list.addEventListener('change', async (e) => {
     const sel = e.target.closest('[data-role]'); if (!sel) return;
     const id = sel.closest('.row-card').dataset.id;
-    try { await API.setRole(id, sel.value); const u = users.find((x) => x.id === id); if (u) u.role = sel.value; toast(`ভূমিকা বদলে ${ROLE_BN[sel.value]} করা হয়েছে।`, 'success'); }
+    try { await API.setRole(id, sel.value); const u = users.find((x) => x.id === id); if (u) u.role = sel.value; draw($('#uQ', el).value); toast(`ভূমিকা বদলে ${ROLE_BN[sel.value]} করা হয়েছে।`, 'success'); }
     catch (er) { toast(errMsg(er), 'error'); draw($('#uQ', el).value); }
   });
+  list.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-rm]'); if (!b) return;
+    const id = b.closest('.row-card').dataset.id, u = users.find((x) => x.id === id); if (!u) return;
+    if (!(await confirmBox(`“${u.email}” অ্যাকাউন্টটি এবং এর রক্তদাতা তথ্য স্থায়ীভাবে মুছে যাবে। এটি ফেরানো যায় না। নিশ্চিত?`, 'স্থায়ীভাবে মুছুন'))) return;
+    try { await API.deleteUser(id); users = users.filter((x) => x.id !== id); draw($('#uQ', el).value); toast('অ্যাকাউন্ট মুছে ফেলা হয়েছে।', 'success'); }
+    catch (er) { toast(errMsg(er), 'error'); }
+  });
+}
+
+async function tabNotices(el) {
+  el.innerHTML = `<form id="nForm" class="glass form-card" novalidate>
+    <h2>নতুন নোটিশ প্রকাশ করুন</h2>
+    <div class="field"><label for="n-title">শিরোনাম</label><input id="n-title" name="title" maxlength="120" required placeholder="যেমন: রক্তদান কর্মসূচি"></div>
+    <div class="field"><label for="n-body">বিস্তারিত</label><textarea id="n-body" name="body" maxlength="3000" required placeholder="নোটিশের লেখা"></textarea></div>
+    <div class="field"><label for="n-dur">নোটিশ কতক্ষণ থাকবে</label><select id="n-dur" name="dur">${NOTICE_DURATIONS.map(([h, l]) => `<option value="${h}">${l}</option>`).join('')}</select></div>
+    <p class="form-msg" id="nMsg" role="alert"></p>
+    <div class="actions"><button class="btn btn-primary" type="submit">${icon('bell')} প্রকাশ করুন</button></div></form>
+    <div class="sec-block"><h2>সব নোটিশ</h2><div id="nList" class="cards cards-notice"><div class="skel"></div></div></div>`;
+  const box = $('#nList', el);
+  async function load() {
+    try {
+      const list = await API.notices(true);
+      box.innerHTML = list.length ? list.map((n) => noticeCard(n, { del: true })).join('') : '<p class="muted">এখনও কোনো নোটিশ দেওয়া হয়নি।</p>';
+    } catch (e) { box.innerHTML = `<div class="note bad">${icon('alert')}<span>${esc(errMsg(e))}</span></div>`; }
+  }
+  $('#nForm', el).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target), title = String(f.get('title') || '').trim(), body = String(f.get('body') || '').trim();
+    const msg = $('#nMsg', el); msg.textContent = '';
+    if (title.length < 2) { msg.textContent = 'নোটিশের শিরোনাম লিখুন।'; return; }
+    if (body.length < 2) { msg.textContent = 'নোটিশের বিস্তারিত লিখুন।'; return; }
+    const hours = Number(f.get('dur')) || 24;
+    const btn = $('button[type="submit"]', e.target); setBusy(btn, true);
+    try {
+      await API.createNotice({ title, body, expires_at: new Date(Date.now() + hours * 3600e3).toISOString(), author_name: (S.donor && S.donor.name) || ROLE_BN[S.role] });
+      e.target.reset(); toast('নোটিশ প্রকাশিত হয়েছে।', 'success'); load();
+    } catch (er) { msg.textContent = errMsg(er); }
+    finally { setBusy(btn, false); }
+  });
+  box.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-del]'); if (!b) return;
+    if (!(await confirmBox('এই নোটিশটি মুছে ফেলা হবে। নিশ্চিত?', 'মুছুন'))) return;
+    try { await API.deleteNotice(b.dataset.del); toast('নোটিশ মুছে ফেলা হয়েছে।', 'success'); load(); }
+    catch (er) { toast(errMsg(er), 'error'); }
+  });
+  load();
 }
 
 async function tabSettings(el) {
   el.innerHTML = '<div class="skel" style="height:120px"></div>';
-  let pays = [];
-  try { pays = await API.payments(true); } catch { /* ignore */ }
   const s = S.settings;
   el.innerHTML = `<form id="setForm" class="glass form-card" novalidate>
-    <h2>সাইটের তথ্য</h2>
+    <h2>সাইটের লেখা ও তথ্য</h2>
     ${SETTING_FIELDS.map((g) => `<fieldset><legend>${g.group}</legend>${g.items.map(([k, label, type]) =>
       type === 'textarea' ? `<div class="field"><label for="s-${k}">${label}</label><textarea id="s-${k}" name="${k}">${esc(s[k])}</textarea></div>`
       : type === 'toggle' ? `<label class="check"><input type="checkbox" name="${k}" ${s[k] === 'true' ? 'checked' : ''}><span>${label}</span></label>`
       : `<div class="field"><label for="s-${k}">${label}</label><input id="s-${k}" name="${k}" value="${esc(s[k])}"></div>`).join('')}</fieldset>`).join('')}
     <p class="form-msg" id="setMsg" role="alert"></p>
-    <div class="actions"><button class="btn btn-primary" type="submit">সেটিংস সংরক্ষণ করুন</button></div></form>
-    <div class="sec-block"><div class="between"><h2>ডোনেশন নম্বর</h2><button class="btn btn-ghost btn-sm" id="addPay" type="button">${icon('plus')} নতুন যোগ করুন</button></div>
-      <div id="payList" class="row-list"></div></div>`;
+    <div class="actions"><button class="btn btn-primary" type="submit">সেটিংস সংরক্ষণ করুন</button></div></form>`;
   $('#setForm', el).addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = new FormData(e.target), out = {};
@@ -960,6 +1091,14 @@ async function tabSettings(el) {
     catch (er) { $('#setMsg').textContent = errMsg(er); }
     finally { setBusy(btn, false); }
   });
+}
+
+async function tabPayments(el) {
+  el.innerHTML = '<div class="skel" style="height:120px"></div>';
+  let pays = [];
+  try { pays = await API.payments(true); } catch { /* ignore */ }
+  el.innerHTML = `<div class="sec-block" style="margin-top:0"><div class="between"><h2>ডোনেশন নম্বর</h2><button class="btn btn-ghost btn-sm" id="addPay" type="button">${icon('plus')} নতুন যোগ করুন</button></div>
+    <p class="muted">এখানকার নম্বরগুলো ডোনেশন পেজে সবার সামনে দেখা যায়।</p><div id="payList" class="row-list"></div></div>`;
   const list = $('#payList', el);
   const payRow = (m) => `<div class="pay-edit glass" data-id="${esc(m.id || '')}">
     <div class="grid-2"><div class="field"><label>নাম</label><input name="name" value="${esc(m.name)}" maxlength="40"></div>
@@ -1041,7 +1180,6 @@ routes.developer = async (app) => {
       <div style="width:100%;text-align:left">${contactList(s.dev_phone, s.dev_email, s.dev_facebook, '')}</div>
     </div>
     <div class="note" style="margin-top:16px">${icon('phone2')}<span>এই ওয়েবসাইটটি ফোনের হোম স্ক্রিনে অ্যাপের মতো ইনস্টল করে ব্যবহার করা যায়।</span></div>
-    <div class="cta" style="margin-top:14px"><button class="btn btn-ghost js-install" type="button" hidden></button></div>
   </section>`;
 };
 
