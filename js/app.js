@@ -406,14 +406,19 @@ async function doInstall() {
 }
 
 /* ---------------------------------------------------------------- অথ */
+async function fetchRole() {
+  if (!S.user) return;
+  const { data, error } = await sb.from('profiles').select('role').eq('id', S.user.id).maybeSingle();
+  if (error) { S.roleError = error.message || String(error); return; }
+  S.roleError = '';
+  S.role = (data && data.role) || 'donor';
+}
 async function setSession(session) {
   S.user = session ? session.user : null;
-  S.role = 'anon'; S.donor = null;
+  S.role = 'anon'; S.donor = null; S.roleError = '';
   if (!S.user) return;
-  try {
-    const { data } = await sb.from('profiles').select('role').eq('id', S.user.id).maybeSingle();
-    S.role = (data && data.role) || 'donor';
-  } catch { S.role = 'donor'; }
+  S.role = 'donor';
+  try { await fetchRole(); } catch (e) { S.roleError = String(e && e.message || e); }
   try { S.donor = await API.myDonor(S.user.id); } catch { S.donor = null; }
 }
 async function loadMine() {
@@ -779,7 +784,9 @@ async function logout() {
 routes.dashboard = async (app, params, alive) => {
   if (DEMO) { app.innerHTML = demoCard('ড্যাশবোর্ড'); return; }
   if (!S.user) { location.hash = '#/login'; return; }
+  try { await fetchRole(); } catch (e) { S.roleError = String(e && e.message || e); }
   await loadMine(); if (!alive()) return;
+  renderNav('dashboard');
   const isMod = S.role === 'moderator' || S.role === 'developer', isDev = S.role === 'developer';
   const pending = isMod ? await API.pendingCount() : 0; if (!alive()) return;
   const tabs = [['mine', 'আমার তথ্য', 'user']];
@@ -791,6 +798,7 @@ routes.dashboard = async (app, params, alive) => {
     <div class="dash-head"><div><h1>${S.role === 'developer' ? 'ডেভেলপার প্যানেল' : S.role === 'moderator' ? 'মডারেটর প্যানেল' : 'আমার প্রোফাইল'}</h1>
       <p>${esc(S.user.email || '')} · <span class="tag role">${ROLE_BN[S.role] || ''}</span></p></div>
       <button class="btn btn-ghost btn-sm" type="button" id="logoutBtn">${icon('log-out')} লগআউট</button></div>
+    ${S.roleError ? `<div class="note bad">${icon('alert')}<span>ভূমিকা পড়া যায়নি: ${esc(S.roleError)}</span></div>` : ''}
     <nav class="tabs">${tabs.map(([k, l, ic]) => `<a class="${k === tab ? 'on' : ''}" href="#/dashboard?tab=${k}">${icon(ic)} ${l}${k === 'donors' && pending ? `<span class="count-dot">${bn(pending)}</span>` : ''}</a>`).join('')}</nav>
     <div id="tabBody"></div></section>`;
   $('#logoutBtn', app).addEventListener('click', logout);
@@ -1086,7 +1094,9 @@ async function boot() {
   }
   const loadSettings = API.settings().then((r) => { Object.assign(S.settings, r); }).catch(() => {});
   const cap = new Promise((r) => setTimeout(r, 3000));
-  await Promise.race([Promise.all([initAuth(), loadSettings]), cap]);
+  const authDone = initAuth();
+  await Promise.race([Promise.all([authDone, loadSettings]), cap]);
+  authDone.then(() => { renderNav(); if (['dashboard', 'login', 'register'].includes(currentPath())) route(); });
   loadSettings.then(() => { applySettings(); });
   applySettings();
   renderNav();
