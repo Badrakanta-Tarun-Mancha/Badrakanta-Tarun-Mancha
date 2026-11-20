@@ -5,6 +5,17 @@
 (() => {
 'use strict';
 
+/* ইমেইলের লিংকে চাপ দিয়ে সাইটে ফিরলে ঠিকানার হ্যাশে টোকেন বা ত্রুটির তথ্য থাকে। Supabase সেটা মুছে ফেলার আগেই ধরে রাখা */
+const LANDING = (() => {
+  const h = (location.hash || '').replace(/^#/, '');
+  if (!h || h.startsWith('/')) return null;
+  const p = new URLSearchParams(h);
+  const type = p.get('type'), error = p.get('error_code') || p.get('error');
+  if (!p.get('access_token') && !error && !type) return null;
+  return { type: type || '', error: error || '' };
+})();
+const SITE_URL = location.origin + location.pathname;
+
 /* কোনো ত্রুটি হলে পেজ খালি না রেখে স্ক্রিনে কারণ দেখানো */
 function showFatal(msg) {
   const app = document.getElementById('app');
@@ -25,7 +36,7 @@ const GAP_DAYS = Number(CFG.DONATION_GAP_DAYS) || 120;
 const CONFIGURED = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && !/YOUR_/i.test(CFG.SUPABASE_URL + CFG.SUPABASE_ANON_KEY));
 let sb = null;
 if (CONFIGURED && window.supabase) {
-  try { sb = window.supabase.createClient(String(CFG.SUPABASE_URL).trim(), String(CFG.SUPABASE_ANON_KEY).trim()); }
+  try { sb = window.supabase.createClient(String(CFG.SUPABASE_URL).trim(), String(CFG.SUPABASE_ANON_KEY).trim(), { auth: { flowType: 'implicit', detectSessionInUrl: true, persistSession: true, autoRefreshToken: true } }); }
   catch (e) { console.error(e); setTimeout(() => showFatal('Supabase কনফিগ ভুল: ' + e.message + ' — js/config.js-এর লাইন ৯ ও ১০ দেখুন'), 0); }
 }
 const DEMO = !sb;
@@ -124,6 +135,8 @@ const ICONS = {
   phone2: '<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
   arrow: '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>',
   bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+  eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+  chart: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',
   alert: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
 };
 const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ''}</svg>`;
@@ -315,6 +328,33 @@ const API = {
     const { error } = await sb.rpc('delete_user_account', { target: id });
     if (error) throw error;
   },
+  async recordVisit() {
+    if (DEMO) return;
+    let id = store.get('vid');
+    if (!id) { id = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); })); store.set('vid', id); }
+    S.vid = id;
+    await sb.rpc('record_visit', { p_visitor: id });
+  },
+  async recordNoticeViews(list) {
+    if (DEMO || !S.vid) return;
+    let seen = []; try { seen = JSON.parse(sessionStorage.getItem('seenN') || '[]'); } catch { /* ignore */ }
+    const ids = list.map((n) => n.id).filter((id) => !seen.includes(id)).slice(0, 50);
+    if (!ids.length) return;
+    try { sessionStorage.setItem('seenN', JSON.stringify(seen.concat(ids))); } catch { /* ignore */ }
+    await sb.rpc('record_notice_views', { p_ids: ids, p_visitor: S.vid });
+  },
+  async visitStats() {
+    if (DEMO) demoOnly();
+    const { data, error } = await sb.rpc('visit_stats');
+    if (error) throw error;
+    return data;
+  },
+  async noticeViewCounts() {
+    if (DEMO) return {};
+    const { data, error } = await sb.rpc('notice_view_counts');
+    if (error) throw error;
+    return Object.fromEntries((data || []).map((r) => [r.notice_id, Number(r.viewers)]));
+  },
   async stats() {
     const by = {}; let total = 0;
     if (DEMO) { DEMO_DONORS.forEach((d) => { by[d.blood_group] = (by[d.blood_group] || 0) + 1; total++; }); return { total, by }; }
@@ -416,11 +456,12 @@ function navItems() {
   return items;
 }
 function renderNav(active = currentPath()) {
-  $('#drawerLinks').innerHTML = navItems().map(([p, l, ic], i) =>
+  $('#drawerLinks').innerHTML = '<button class="install-row js-install" type="button" style="--i:0"></button>' + navItems().map(([p, l, ic], i) =>
     `<a href="#/${p}" style="--i:${i}" class="${p === active ? 'on' : ''}">${icon(ic)}<span>${l}</span></a>`).join('') +
     (S.user ? `<a href="#/" data-logout style="--i:9">${icon('log-out')}<span>লগআউট</span></a>` : '');
   const bottom = [['', 'হোম', 'home'], ['search', 'খুঁজুন', 'search'], ['register', 'রক্তদাতা হোন', 'user-plus'], ['notices', 'নোটিশ', 'bell'], ['donate', 'ডোনেশন', 'heart']];
   $('#bottomNav').innerHTML = bottom.map(([p, l, ic]) => `<a href="#/${p}" class="${p === active ? 'on' : ''}">${icon(ic)}<span>${l}</span></a>`).join('');
+  updateInstallUI();
 }
 const setDrawer = (open) => {
   document.body.classList.toggle('drawer-open', open);
@@ -436,12 +477,15 @@ function applySettings() {
 /* ---------------------------------------------------------------- ইনস্টল (PWA) */
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 function updateInstallUI() {
+  const done = isStandalone();
   $$('.js-install').forEach((b) => {
-    b.hidden = isStandalone();
-    b.innerHTML = `${icon('download')} অ্যাপ হিসেবে ইনস্টল করুন`;
+    b.hidden = false;
+    b.classList.toggle('is-done', done);
+    b.innerHTML = done ? `${icon('check')}<span>অ্যাপ ইনস্টল করা আছে</span>` : `${icon('download')}<span>অ্যাপ হিসেবে ইনস্টল করুন</span>`;
   });
 }
 async function doInstall() {
+  if (isStandalone()) { toast('অ্যাপটি আগেই ইনস্টল করা আছে।', 'success'); return; }
   if (S.installEvt) {
     S.installEvt.prompt();
     await S.installEvt.userChoice.catch(() => {});
@@ -496,7 +540,7 @@ async function initAuth() {
   } catch { /* ignore */ }
   sb.auth.onAuthStateChange((evt, session) => {
     setTimeout(async () => {
-      if (evt === 'PASSWORD_RECOVERY') { openRecovery(); return; }
+      if (evt === 'PASSWORD_RECOVERY') { if (currentPath() !== 'reset') location.hash = '#/reset'; return; }
       if (evt === 'INITIAL_SESSION') return;
       const had = S.user && S.user.id;
       await setSession(session);
@@ -506,22 +550,6 @@ async function initAuth() {
     }, 0);
   });
 }
-function openRecovery() {
-  const sheet = openModal(`<h2>নতুন পাসওয়ার্ড দিন</h2>
-    <form id="recForm" novalidate><div class="field"><label for="rp">নতুন পাসওয়ার্ড</label><input id="rp" type="password" minlength="6" autocomplete="new-password" required></div>
-    <p class="form-msg" id="recMsg"></p><button class="btn btn-primary" type="submit">পাসওয়ার্ড বদলান</button></form>`);
-  $('#recForm', sheet).addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const pw = $('#rp').value;
-    if (pw.length < 6) { $('#recMsg').textContent = 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের দিন।'; return; }
-    const btn = $('button', e.target); setBusy(btn, true);
-    const { error } = await sb.auth.updateUser({ password: pw });
-    setBusy(btn, false);
-    if (error) { $('#recMsg').textContent = errMsg(error); return; }
-    closeModal(); toast('পাসওয়ার্ড বদলানো হয়েছে।', 'success');
-  });
-}
-
 /* ---------------------------------------------------------------- রাউটার */
 const routes = {};
 let rt = 0;
@@ -547,9 +575,66 @@ async function route() {
   app.classList.remove('page-in'); void app.offsetWidth; app.classList.add('page-in');
   window.scrollTo(0, 0);
   updateInstallUI();
-  const titles = { notices: 'নোটিশ বোর্ড', search: 'রক্তদাতা খুঁজুন', register: 'রক্তদাতা হোন', donate: 'ডোনেশন', about: 'আমাদের সম্পর্কে', developer: 'ডেভেলপার পরিচিতি', login: 'লগইন', dashboard: 'ড্যাশবোর্ড' };
+  const titles = { verified: 'ইমেইল যাচাই', reset: 'নতুন পাসওয়ার্ড', 'auth-error': 'লিংকে সমস্যা', notices: 'নোটিশ বোর্ড', search: 'রক্তদাতা খুঁজুন', register: 'রক্তদাতা হোন', donate: 'ডোনেশন', about: 'আমাদের সম্পর্কে', developer: 'ডেভেলপার পরিচিতি', login: 'লগইন', dashboard: 'ড্যাশবোর্ড' };
   document.title = (titles[path] ? titles[path] + ' · ' : '') + S.settings.org_name;
 }
+
+const bigIcon = (n, c) => `<div class="big-ic ${c || ''}">${icon(n)}</div>`;
+
+routes.verified = async (app) => {
+  app.innerHTML = '<section class="container narrow"><div class="glass form-card"><div class="skel" style="height:120px"></div></div></section>';
+  try { await S.authReady; } catch { /* ignore */ }
+  const extra = S.donor ? `<div class="note ok">${icon('check')}<span>আপনার রক্তদাতা তথ্যও জমা হয়েছে${S.donor.status === 'pending' ? ', মডারেটরের অনুমোদনের পর তালিকায় আসবে' : ''}।</span></div>` : '';
+  app.innerHTML = `<section class="container narrow"><div class="glass form-card" style="text-align:center;justify-items:center">
+    ${bigIcon('check', 'ok')}<h1 class="page-title" style="margin:0">ইমেইল যাচাই সফল হয়েছে</h1>
+    <p class="muted">ধন্যবাদ! আপনার অ্যাকাউন্ট এখন চালু হয়ে গেছে।</p>${extra}
+    <div class="cta">${S.user ? `<a class="btn btn-primary" href="#/dashboard">${icon('user')} আমার প্রোফাইলে যান</a>` : `<a class="btn btn-primary" href="#/login">${icon('log-in')} লগইন করুন</a>`}<a class="btn btn-ghost" href="#/">${icon('home')} হোমে যান</a></div>
+  </div></section>`;
+};
+
+routes.reset = async (app) => {
+  if (DEMO) { app.innerHTML = demoCard('নতুন পাসওয়ার্ড'); return; }
+  app.innerHTML = '<section class="container narrow"><div class="glass form-card"><div class="skel" style="height:160px"></div></div></section>';
+  try { await S.authReady; } catch { /* ignore */ }
+  if (!S.user) {
+    app.innerHTML = `<section class="container narrow"><div class="glass form-card" style="text-align:center;justify-items:center">${bigIcon('alert', 'bad')}
+      <h1 class="page-title" style="margin:0">লিংকটি আর কাজ করছে না</h1>
+      <p class="muted">পাসওয়ার্ড বদলানোর লিংকের মেয়াদ শেষ হয়ে গেছে বা আগেই ব্যবহার করা হয়েছে। লগইন পেজে গিয়ে "পাসওয়ার্ড ভুলে গেছেন?" চেপে নতুন লিংক নিন।</p>
+      <a class="btn btn-primary" href="#/login">${icon('log-in')} লগইন পেজে যান</a></div></section>`;
+    return;
+  }
+  app.innerHTML = `<section class="container narrow"><div class="glass form-card">
+    <div style="text-align:center;display:grid;justify-items:center;gap:6px">${bigIcon('shield')}<h1 class="page-title" style="margin:0">নতুন পাসওয়ার্ড দিন</h1>
+    <p class="muted">${esc(S.user.email || '')}</p></div>
+    <form id="resetForm" novalidate>
+      <div class="field"><label for="np1">নতুন পাসওয়ার্ড <small>(কমপক্ষে ৬ অক্ষর)</small></label><input id="np1" type="password" minlength="6" autocomplete="new-password" required></div>
+      <div class="field"><label for="np2">আবার একই পাসওয়ার্ড লিখুন</label><input id="np2" type="password" minlength="6" autocomplete="new-password" required></div>
+      <p class="form-msg" id="resetMsg" role="alert"></p>
+      <button class="btn btn-primary btn-block" type="submit">${icon('check')} পাসওয়ার্ড বদলান</button>
+    </form></div></section>`;
+  $('#resetForm', app).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const a = $('#np1', app).value, b = $('#np2', app).value, msg = $('#resetMsg', app);
+    if (a.length < 6) { msg.textContent = 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের দিন।'; return; }
+    if (a !== b) { msg.textContent = 'দুটি পাসওয়ার্ড মিলছে না। আবার লিখুন।'; return; }
+    const btn = $('button[type="submit"]', e.target); setBusy(btn, true);
+    const { error } = await sb.auth.updateUser({ password: a });
+    if (error) { msg.textContent = errMsg(error); setBusy(btn, false); return; }
+    app.innerHTML = `<section class="container narrow"><div class="glass form-card" style="text-align:center;justify-items:center">${bigIcon('check', 'ok')}
+      <h1 class="page-title" style="margin:0">পাসওয়ার্ড বদলানো হয়েছে</h1><p class="muted">এখন থেকে নতুন পাসওয়ার্ড দিয়ে লগইন করবেন।</p>
+      <a class="btn btn-primary" href="#/dashboard">${icon('user')} আমার প্রোফাইলে যান</a></div></section>`;
+  });
+};
+
+routes['auth-error'] = async (app, params) => {
+  const code = params.get('c') || '';
+  const expired = /otp_expired|expired|invalid/i.test(code);
+  app.innerHTML = `<section class="container narrow"><div class="glass form-card" style="text-align:center;justify-items:center">${bigIcon('alert', 'bad')}
+    <h1 class="page-title" style="margin:0">${expired ? 'লিংকটির মেয়াদ শেষ' : 'যাচাই করা যায়নি'}</h1>
+    <p class="muted">${expired ? 'এই লিংকটির মেয়াদ শেষ হয়ে গেছে বা আগেই ব্যবহার করা হয়েছে।' : 'লিংকে কোনো সমস্যা হয়েছে।'}</p>
+    <div class="note">${icon('info')}<span>অনেক ইমেইল অ্যাপ লিংক আগেই একবার খুলে দেখে, তাই আপনার ইমেইল ইতিমধ্যে যাচাই হয়ে থাকতে পারে। আগে লগইন করে দেখুন। না হলে "পাসওয়ার্ড ভুলে গেছেন?" দিয়ে নতুন লিংক নিন।</span></div>
+    <a class="btn btn-primary" href="#/login">${icon('log-in')} লগইন পেজে যান</a></div></section>`;
+};
 
 function viewNotFound(app) {
   app.innerHTML = `<section class="container narrow"><div class="glass form-card" style="text-align:center"><h1 class="page-title">পেজটি পাওয়া যায়নি</h1><a class="btn btn-primary" href="#/">${icon('home')} হোমে ফিরুন</a></div></section>`;
@@ -604,6 +689,7 @@ routes[''] = async (app, p, alive) => {
   API.notices(false).then((list) => {
     if (!alive() || !list.length) return;
     const box = $('#homeNotices', app); if (!box) return;
+    API.recordNoticeViews(list.slice(0, 3)).catch(() => {});
     $('#hnList', box).innerHTML = list.slice(0, 3).map((n) => noticeCard(n)).join('');
     box.hidden = false;
   }).catch(() => {});
@@ -646,6 +732,7 @@ function noticeCard(n, o = {}) {
         <p><b>${esc(n.author_name || ROLE_BN[n.author_role] || '')}</b>${badge(n.author_role)} <span class="muted">· ${relPast(n.created_at)}</span></p></div></div>
     <div class="n-body">${paragraphs(n.body)}</div>
     <div class="n-foot"><span class="tag ${expired ? 'rest' : 'ready'}">${expired ? 'মেয়াদ শেষ' : relLeft(n.expires_at)}</span>
+      ${o.views != null ? `<span class="muted views">${icon('eye')} ${bn(o.views)} জন দেখেছেন</span>` : ''}
       ${o.del ? `<button class="btn btn-danger btn-sm" data-del="${esc(n.id)}" type="button">${icon('trash')} মুছুন</button>` : ''}</div>
   </article>`;
 }
@@ -657,6 +744,7 @@ routes.notices = async (app, p, alive) => {
   let list = [];
   try { list = await API.notices(false); } catch (e) { if (alive()) $('#nBoard', app).innerHTML = `<div class="empty glass">${icon('alert')}<b>${esc(errMsg(e))}</b></div>`; return; }
   if (!alive()) return;
+  API.recordNoticeViews(list).catch(() => {});
   $('#nBoard', app).innerHTML = list.length ? list.map((n) => noticeCard(n)).join('')
     : `<div class="empty glass">${icon('bell')}<b>এখন কোনো নোটিশ নেই</b><p class="muted">নতুন নোটিশ এলে এখানে দেখা যাবে।</p></div>`;
 };
@@ -787,7 +875,7 @@ routes.register = async (app) => {
     const btn = $('button[type="submit"]', form); setBusy(btn, true);
     try {
       if (needAccount) {
-        const { data, error } = await sb.auth.signUp({ email, password: pass });
+        const { data, error } = await sb.auth.signUp({ email, password: pass, options: { emailRedirectTo: SITE_URL } });
         if (error) throw error;
         if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) throw new Error('User already registered');
         if (!data.session) {
@@ -832,7 +920,7 @@ routes.login = async (app, params) => {
     const btn = $('button[type="submit"]', form); setBusy(btn, true);
     try {
       if (signup) {
-        const { data, error } = await sb.auth.signUp({ email, password });
+        const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: SITE_URL } });
         if (error) throw error;
         if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) throw new Error('User already registered');
         if (!data.session) { toast('ইমেইলে পাঠানো লিংকে চাপ দিয়ে অ্যাকাউন্ট যাচাই করুন, তারপর লগইন করুন।', 'success'); location.hash = '#/login'; return; }
@@ -851,7 +939,7 @@ routes.login = async (app, params) => {
   if (forgot) forgot.addEventListener('click', async () => {
     const email = form.email.value.trim();
     if (!/^\S+@\S+\.\S+$/.test(email)) { msg.textContent = 'আগে উপরে আপনার ইমেইল লিখুন।'; return; }
-    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: SITE_URL });
     if (error) msg.textContent = errMsg(error); else toast('পাসওয়ার্ড বদলানোর লিংক ইমেইলে পাঠানো হয়েছে।', 'success');
   });
 };
@@ -873,7 +961,7 @@ routes.dashboard = async (app, params, alive) => {
   const pending = isMod ? await API.pendingCount() : 0; if (!alive()) return;
   const tabs = [['mine', 'আমার তথ্য', 'user']];
   if (isMod) tabs.push(['donors', 'রক্তদাতা তালিকা', 'droplet'], ['payments', 'ডোনেশন নম্বর', 'heart']);
-  if (isAdm) tabs.push(['notices', 'নোটিশ', 'bell'], ['settings', 'সাইটের লেখা', 'settings']);
+  if (isAdm) tabs.push(['notices', 'নোটিশ', 'bell'], ['stats', 'পরিসংখ্যান', 'chart'], ['settings', 'সাইটের লেখা', 'settings']);
   if (isDev) tabs.push(['users', 'ব্যবহারকারী', 'users']);
   const want = params.get('tab');
   const tab = tabs.some((t) => t[0] === want) ? want : (isMod ? 'donors' : 'mine');
@@ -890,6 +978,7 @@ routes.dashboard = async (app, params, alive) => {
   else if (tab === 'donors') tabDonors(body);
   else if (tab === 'payments') await tabPayments(body);
   else if (tab === 'notices') await tabNotices(body);
+  else if (tab === 'stats') await tabStats(body);
   else if (tab === 'users') await tabUsers(body);
   else if (tab === 'settings') await tabSettings(body);
 };
@@ -1031,6 +1120,29 @@ async function tabUsers(el) {
   });
 }
 
+async function tabStats(el) {
+  el.innerHTML = '<div class="skel" style="height:140px"></div>';
+  let st, list = [], counts = {};
+  try { [st, list, counts] = await Promise.all([API.visitStats(), API.notices(true), API.noticeViewCounts().catch(() => ({}))]); }
+  catch (e) { el.innerHTML = `<div class="note bad">${icon('alert')}<span>${esc(errMsg(e))}${/function|schema cache|does not exist/i.test(String(e && e.message)) ? ' — update-4.sql চালানো হয়েছে কিনা দেখুন।' : ''}</span></div>`; return; }
+  const dayKey = (d) => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 10); };
+  const map = Object.fromEntries((st.daily || []).map((r) => [String(r.day).slice(0, 10), r]));
+  const days = []; for (let i = 13; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); const k = dayKey(d); days.push({ k, d, v: map[k] ? Number(map[k].visitors) : 0 }); }
+  const max = Math.max(1, ...days.map((x) => x.v));
+  const num = (v) => bn(Number(v || 0));
+  el.innerHTML = `<div class="stat-grid">
+      <div class="stat glass"><b>${num(st.today_visitors)}</b><span>আজকের ভিজিটর</span></div>
+      <div class="stat glass"><b>${num(st.week_visitors)}</b><span>গত ৭ দিন</span></div>
+      <div class="stat glass"><b>${num(st.month_visitors)}</b><span>গত ৩০ দিন</span></div>
+      <div class="stat glass"><b>${num(st.total_visitors)}</b><span>মোট ভিজিটর</span></div>
+      <div class="stat glass"><b>${num(st.today_hits)}</b><span>আজকের পেজ-লোড</span></div>
+      <div class="stat glass"><b>${num(st.total_hits)}</b><span>মোট পেজ-লোড</span></div></div>
+    <div class="glass form-card" style="margin-top:16px"><h2>গত ১৪ দিনের ভিজিটর</h2>
+      <div class="bars">${days.map((x) => `<div class="bar" title="${esc(fmtD(x.d))}: ${num(x.v)} জন"><em>${x.v ? num(x.v) : ''}</em><i style="height:${Math.max(x.v ? 8 : 2, Math.round(x.v / max * 100))}%"></i><small>${bn(x.d.getDate())}</small></div>`).join('')}</div></div>
+    <div class="sec-block"><h2>নোটিশ কতজন দেখেছে</h2><div class="row-list">${list.length ? list.map((n) => `<div class="row-card glass"><div class="rc-main"><b>${esc(n.title)}</b><span>${new Date(n.expires_at) <= Date.now() ? 'মেয়াদ শেষ' : relLeft(n.expires_at)}</span></div><span class="tag role">${icon('eye')} ${num(counts[n.id])} জন</span></div>`).join('') : '<p class="muted">এখনও কোনো নোটিশ নেই।</p>'}</div></div>
+    <div class="note" style="margin-top:14px">${icon('info')}<span>এখানে শুধু সংখ্যা গোনা হয়, কারও নাম বা ব্যক্তিগত তথ্য রাখা হয় না। প্রতিটি ফোন/ব্রাউজারকে একজন ধরা হয়, তাই এটি আনুমানিক সংখ্যা।</span></div>`;
+}
+
 async function tabNotices(el) {
   el.innerHTML = `<form id="nForm" class="glass form-card" novalidate>
     <h2>নতুন নোটিশ প্রকাশ করুন</h2>
@@ -1043,8 +1155,8 @@ async function tabNotices(el) {
   const box = $('#nList', el);
   async function load() {
     try {
-      const list = await API.notices(true);
-      box.innerHTML = list.length ? list.map((n) => noticeCard(n, { del: true })).join('') : '<p class="muted">এখনও কোনো নোটিশ দেওয়া হয়নি।</p>';
+      const [list, counts] = await Promise.all([API.notices(true), API.noticeViewCounts().catch(() => ({}))]);
+      box.innerHTML = list.length ? list.map((n) => noticeCard(n, { del: true, views: counts[n.id] || 0 })).join('') : '<p class="muted">এখনও কোনো নোটিশ দেওয়া হয়নি।</p>';
     } catch (e) { box.innerHTML = `<div class="note bad">${icon('alert')}<span>${esc(errMsg(e))}</span></div>`; }
   }
   $('#nForm', el).addEventListener('submit', async (e) => {
@@ -1233,7 +1345,15 @@ async function boot() {
   const loadSettings = API.settings().then((r) => { Object.assign(S.settings, r); }).catch(() => {});
   const cap = new Promise((r) => setTimeout(r, 3000));
   const authDone = initAuth();
-  await Promise.race([Promise.all([authDone, loadSettings]), cap]);
+  S.authReady = authDone;
+  API.recordVisit().catch(() => {});
+  if (LANDING) {
+    await Promise.race([authDone, new Promise((r) => setTimeout(r, 8000))]);
+    const target = LANDING.error ? '#/auth-error?c=' + encodeURIComponent(LANDING.error) : LANDING.type === 'recovery' ? '#/reset' : '#/verified';
+    history.replaceState(null, '', location.pathname + location.search + target);
+  } else {
+    await Promise.race([Promise.all([authDone, loadSettings]), cap]);
+  }
   authDone.then(() => { renderNav(); if (['dashboard', 'login', 'register'].includes(currentPath())) route(); });
   loadSettings.then(() => { applySettings(); });
   applySettings();
